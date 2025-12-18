@@ -5,17 +5,8 @@ from io import BytesIO
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
-st.set_page_config(page_title="Course Completion Report", layout="wide")
-st.title("📘 Course Completion Report")
-
-uploaded_file = st.file_uploader(
-    "Upload Excel course completion file",
-    type=["xlsx"]
-)
-
-if not uploaded_file:
-    st.info("Upload the Excel file shown above")
-    st.stop()
+st.set_page_config(page_title="Course Completion Status", layout="wide")
+st.title("📘 Course Completion Status")
 
 # --------------------------------------------------
 # HELPERS
@@ -41,6 +32,34 @@ def office_group(office):
     return "Office Group 1" if office in group1 else "Office Group 2"
 
 
+@st.cache_data(show_spinner=False)
+def process_excel(file):
+    df = pd.read_excel(file)
+    df.columns = df.columns.astype(str).str.strip()
+
+    required = {"Employee Name", "Office of Working"}
+    if not required.issubset(df.columns):
+        raise ValueError("Required columns missing")
+
+    course_cols = [
+        c for c in df.columns
+        if c not in ["Employee Name", "Office of Working", "Total Courses"]
+        and pd.api.types.is_numeric_dtype(df[c])
+    ]
+
+    total_courses = len(course_cols)
+
+    df["Completed Courses"] = df[course_cols].sum(axis=1)
+    df["Completion %"] = round((df["Completed Courses"] / total_courses) * 100, 2)
+    df["Office Group"] = df["Office of Working"].apply(office_group)
+
+    division_pct = round(
+        (df["Completed Courses"].sum() / (len(df) * total_courses)) * 100, 2
+    )
+
+    return df, division_pct, total_courses
+
+
 def df_to_excel_bytes(df):
     out = BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
@@ -49,56 +68,44 @@ def df_to_excel_bytes(df):
     return out.getvalue()
 
 # --------------------------------------------------
-# READ EXCEL (AS-IS)
+# ADMIN SECTION
 # --------------------------------------------------
-df = pd.read_excel(uploaded_file)
+st.sidebar.header("🔐 Admin Panel")
 
-# Clean column names
-df.columns = df.columns.astype(str).str.strip()
-
-# Mandatory columns
-required_cols = ["Employee Name", "Office of Working"]
-for col in required_cols:
-    if col not in df.columns:
-        st.error(f"Required column missing: {col}")
-        st.stop()
-
-# --------------------------------------------------
-# IDENTIFY COURSE COLUMNS
-# --------------------------------------------------
-course_cols = [
-    c for c in df.columns
-    if c not in ["Employee Name", "Office of Working", "Total Courses"]
-    and pd.api.types.is_numeric_dtype(df[c])
-]
-
-if not course_cols:
-    st.error("No course columns detected.")
-    st.stop()
-
-total_courses = len(course_cols)
-
-# --------------------------------------------------
-# CALCULATE COMPLETION %
-# --------------------------------------------------
-df["Completed Courses"] = df[course_cols].sum(axis=1)
-df["Completion %"] = round((df["Completed Courses"] / total_courses) * 100, 2)
-df["Office Group"] = df["Office of Working"].apply(office_group)
-
-# --------------------------------------------------
-# DIVISION COMPLETION %
-# --------------------------------------------------
-division_pct = round(
-    (df["Completed Courses"].sum() / (len(df) * total_courses)) * 100, 2
+admin_upload = st.sidebar.file_uploader(
+    "Upload / Update Excel (Admin only)",
+    type=["xlsx"]
 )
 
+if admin_upload:
+    try:
+        df_data, division_pct, total_courses = process_excel(admin_upload)
+        st.session_state["data"] = df_data
+        st.session_state["division_pct"] = division_pct
+        st.session_state["total_courses"] = total_courses
+        st.sidebar.success("✅ Data updated successfully")
+    except Exception as e:
+        st.sidebar.error(f"Upload failed: {e}")
+
+# --------------------------------------------------
+# CHECK IF DATA EXISTS
+# --------------------------------------------------
+if "data" not in st.session_state:
+    st.info("⏳ Data not yet uploaded by Admin.")
+    st.stop()
+
+df = st.session_state["data"]
+division_pct = st.session_state["division_pct"]
+total_courses = st.session_state["total_courses"]
+
+# --------------------------------------------------
+# DIVISION SUMMARY
+# --------------------------------------------------
 st.subheader("📊 Division Completion Status")
 st.metric("Division Completion %", f"{division_pct}%")
 
-st.divider()
-
 # --------------------------------------------------
-# OFFICE-WISE COMPLETION %
+# OFFICE SUMMARY
 # --------------------------------------------------
 office_summary = (
     df.groupby("Office Group")
@@ -112,12 +119,12 @@ st.dataframe(office_summary)
 st.divider()
 
 # --------------------------------------------------
-# SEARCH EMPLOYEE
+# END USER SEARCH
 # --------------------------------------------------
-st.subheader("🔍 Search Employee (min 4 characters)")
+st.subheader("🔍 Check Your Completion Status")
 
 names = sorted(df["Employee Name"].dropna().unique())
-query = st.text_input("Type your name")
+query = st.text_input("Type at least 4 characters of your name")
 
 selected_name = None
 if len(query) >= 4:
@@ -131,7 +138,7 @@ if not selected_name:
     st.stop()
 
 # --------------------------------------------------
-# DISPLAY USER REPORT (COLORED NAME)
+# USER VIEW
 # --------------------------------------------------
 user_row = df[df["Employee Name"] == selected_name]
 pct = float(user_row["Completion %"].iloc[0])
@@ -144,11 +151,8 @@ st.markdown(
 
 st.dataframe(user_row)
 
-# --------------------------------------------------
-# DOWNLOAD USER REPORT
-# --------------------------------------------------
 st.download_button(
-    "📥 Download My Course Report (Excel)",
+    "📥 Download My Report",
     data=df_to_excel_bytes(user_row),
     file_name=f"{selected_name}_course_report.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
