@@ -7,7 +7,7 @@ import pandas as pd
 st.set_page_config(page_title="Course Completion Status", layout="wide")
 st.title("📘 Course Completion Status")
 
-DATA_FILE = "data.xlsx"   # Admin updates this in GitHub
+DATA_FILE = "data.xlsx"   # Admin updates this file in GitHub
 
 # --------------------------------------------------
 # HELPERS
@@ -24,13 +24,13 @@ def completion_color(pct):
 
 
 def unit_name(office):
-    nellore = [
+    nellore_offices = [
         "SRO Nellore",
         "MBC Nellore RMS",
         "RO Chennai",
         "Gudur TMO"
     ]
-    return "Nellore Unit" if office in nellore else "Tirupati Unit"
+    return "Nellore Unit" if office in nellore_offices else "Tirupati Unit"
 
 
 @st.cache_data
@@ -38,15 +38,15 @@ def load_data():
     df = pd.read_excel(DATA_FILE)
     df.columns = df.columns.astype(str).str.strip()
 
-    # Required columns
+    # Mandatory columns
     if "Employee Name" not in df.columns or "Office of Working" not in df.columns:
-        raise ValueError("Required columns missing in Excel")
+        raise ValueError("Excel must contain 'Employee Name' and 'Office of Working'")
 
-    # Course columns = numeric except known fields
-    ignore = {"Employee Name", "Office of Working", "Total Courses"}
+    # Identify course columns (numeric only)
+    ignore_cols = {"Employee Name", "Office of Working", "Total Courses"}
     course_cols = [
         c for c in df.columns
-        if c not in ignore and pd.api.types.is_numeric_dtype(df[c])
+        if c not in ignore_cols and pd.api.types.is_numeric_dtype(df[c])
     ]
 
     if not course_cols:
@@ -64,9 +64,10 @@ def load_data():
         (df["Completed Courses"] / total_courses) * 100, 2
     )
 
+    # Unit mapping
     df["Unit"] = df["Office of Working"].apply(unit_name)
 
-    # Division-level calculation
+    # Division-level calculation (official formula)
     total_slots = len(df) * total_courses
     pending_slots = df[course_cols].eq(1).sum().sum()
     completed_slots = total_slots - pending_slots
@@ -77,7 +78,7 @@ def load_data():
 
 
 # --------------------------------------------------
-# LOAD DATA (SHARED FOR ALL USERS)
+# LOAD DATA
 # --------------------------------------------------
 try:
     df, course_cols, total_courses, division_pct = load_data()
@@ -103,37 +104,12 @@ for unit, g in df.groupby("Unit"):
     unit_rows.append({"Unit": unit, "Completion %": pct})
 
 st.subheader("🏢 Unit-wise Completion %")
-st.dataframe(pd.DataFrame(unit_rows))
+st.dataframe(pd.DataFrame(unit_rows), use_container_width=True)
 
 st.divider()
 
 # --------------------------------------------------
-# LIVE FILTERING (NO ENTER, NO DROPDOWN)
-# --------------------------------------------------
-st.subheader("🔍 Check Your Completion Status")
-
-query = st.text_input("Start typing your name")
-
-filtered_df = df
-if query.strip():
-    filtered_df = df[df["Employee Name"].str.contains(query, case=False, na=False)]
-
-if filtered_df.empty:
-    st.info("No matching names found")
-    st.stop()
-
-# Show filtered list
-display_df = filtered_df[[
-    "Employee Name",
-    "Office of Working",
-    "Unit",
-    "Completion %"
-]].reset_index(drop=True)
-
-st.caption("Matching employees (live filtered)")
-
-# --------------------------------------------------
-# LIVE FILTERING (NO RADIO, NO DROPDOWN)
+# LIVE FILTERING (ONE TEXT BOX ONLY)
 # --------------------------------------------------
 st.subheader("🔍 Check Your Completion Status")
 
@@ -150,7 +126,7 @@ if filtered_df.empty:
     st.info("No matching names found")
     st.stop()
 
-# Show matching names as a simple list
+# Show matching names live
 display_df = filtered_df[[
     "Employee Name",
     "Office of Working",
@@ -161,9 +137,8 @@ display_df = filtered_df[[
 st.caption("Matching employees (live filtered)")
 st.dataframe(display_df, use_container_width=True)
 
-# 🔥 AUTO-SELECT FIRST MATCH
+# 🔥 Auto-pick first matching name
 selected_name = display_df.loc[0, "Employee Name"]
-
 
 # --------------------------------------------------
 # USER REPORT
@@ -189,15 +164,19 @@ st.subheader("📘 Pending Courses")
 if pending_courses.empty:
     st.success("🎉 No pending courses")
 else:
-    st.dataframe(pending_courses)
+    st.dataframe(pending_courses, use_container_width=True)
 
 st.subheader("📄 Summary")
-st.dataframe(user_row[[
-    "Employee Name",
-    "Office of Working",
-    "Unit",
-    "Completed Courses",
-    "Pending Courses",
-    "Completion %"
-]])
-
+st.dataframe(
+    user_row[
+        [
+            "Employee Name",
+            "Office of Working",
+            "Unit",
+            "Completed Courses",
+            "Pending Courses",
+            "Completion %"
+        ]
+    ],
+    use_container_width=True
+)
