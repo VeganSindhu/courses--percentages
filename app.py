@@ -9,46 +9,17 @@ st.set_page_config(page_title="Course Completion Report", layout="wide")
 st.title("📘 Course Completion Report")
 
 uploaded_file = st.file_uploader(
-    "Upload Excel (.xlsx multi-sheet)",
+    "Upload Excel course completion file",
     type=["xlsx"]
 )
 
 if not uploaded_file:
-    st.info("Upload the course completion Excel file")
+    st.info("Upload the Excel file shown above")
     st.stop()
 
 # --------------------------------------------------
 # HELPERS
 # --------------------------------------------------
-def df_to_excel_bytes(df, sheet_name="Report"):
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
-    buffer.seek(0)
-    return buffer.getvalue()
-
-
-def normalize_columns(df):
-    df.columns = df.columns.map(lambda x: str(x).strip() if pd.notna(x) else "Unnamed")
-    cols = pd.Series(df.columns)
-    for dup in cols[cols.duplicated()].unique():
-        idxs = cols[cols == dup].index.tolist()
-        for i, idx in enumerate(idxs):
-            if i > 0:
-                cols[idx] = f"{dup}.{i}"
-    df.columns = cols
-    return df
-
-
-def find_header_row(df):
-    """Find row containing employee name header"""
-    for i in range(min(10, len(df))):
-        row = df.iloc[i].astype(str).str.lower()
-        if row.str.contains("name").any():
-            return i
-    return None
-
-
 def completion_color(pct):
     if pct < 10:
         return "red"
@@ -69,82 +40,68 @@ def office_group(office):
     ]
     return "Office Group 1" if office in group1 else "Office Group 2"
 
+
+def df_to_excel_bytes(df):
+    out = BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+    out.seek(0)
+    return out.getvalue()
+
 # --------------------------------------------------
-# READ & CONSOLIDATE EXCEL (AUTO HEADER DETECTION)
+# READ EXCEL (AS-IS)
 # --------------------------------------------------
-xls = pd.ExcelFile(uploaded_file)
-combined_df = pd.DataFrame()
+df = pd.read_excel(uploaded_file)
 
-for sheet in xls.sheet_names:
-    raw = pd.read_excel(uploaded_file, sheet_name=sheet, header=None)
+# Clean column names
+df.columns = df.columns.astype(str).str.strip()
 
-    header_row = find_header_row(raw)
-    if header_row is None:
-        continue
+# Mandatory columns
+required_cols = ["Employee Name", "Office of Working"]
+for col in required_cols:
+    if col not in df.columns:
+        st.error(f"Required column missing: {col}")
+        st.stop()
 
-    df_sheet = raw.iloc[header_row + 1:].copy()
-    df_sheet.columns = raw.iloc[header_row]
-    df_sheet = df_sheet.dropna(axis=1, how="all")
-    df_sheet = normalize_columns(df_sheet)
+# --------------------------------------------------
+# IDENTIFY COURSE COLUMNS
+# --------------------------------------------------
+course_cols = [
+    c for c in df.columns
+    if c not in ["Employee Name", "Office of Working", "Total Courses"]
+    and pd.api.types.is_numeric_dtype(df[c])
+]
 
-    # Normalize employee name column
-    name_col = next((c for c in df_sheet.columns if "name" in c.lower()), None)
-    if not name_col:
-        continue
-    df_sheet = df_sheet.rename(columns={name_col: "Employee Name"})
-
-    # Column E → Office of Working (safe)
-    if len(df_sheet.columns) >= 5:
-        df_sheet = df_sheet.rename(columns={df_sheet.columns[4]: "Office of Working"})
-    else:
-        df_sheet["Office of Working"] = "Unknown"
-
-    df_sheet["Course Name"] = sheet
-
-    combined_df = pd.concat([combined_df, df_sheet], ignore_index=True)
-
-if combined_df.empty:
-    st.error("No usable employee data found in Excel sheets.")
+if not course_cols:
+    st.error("No course columns detected.")
     st.stop()
 
-# --------------------------------------------------
-# CREATE PIVOT
-# --------------------------------------------------
-pivot_df = combined_df.pivot_table(
-    index=["Employee Name", "Office of Working"],
-    columns="Course Name",
-    aggfunc="size",
-    fill_value=0
-).reset_index()
-
-course_cols = pivot_df.columns[2:]
 total_courses = len(course_cols)
 
-pivot_df["Completed Courses"] = pivot_df[course_cols].sum(axis=1)
-pivot_df["Completion %"] = round(
-    (pivot_df["Completed Courses"] / total_courses) * 100, 2
-)
-
-pivot_df["Office Group"] = pivot_df["Office of Working"].apply(office_group)
+# --------------------------------------------------
+# CALCULATE COMPLETION %
+# --------------------------------------------------
+df["Completed Courses"] = df[course_cols].sum(axis=1)
+df["Completion %"] = round((df["Completed Courses"] / total_courses) * 100, 2)
+df["Office Group"] = df["Office of Working"].apply(office_group)
 
 # --------------------------------------------------
 # DIVISION COMPLETION %
 # --------------------------------------------------
-division_completion_pct = round(
-    (pivot_df["Completed Courses"].sum() / (len(pivot_df) * total_courses)) * 100, 2
+division_pct = round(
+    (df["Completed Courses"].sum() / (len(df) * total_courses)) * 100, 2
 )
 
 st.subheader("📊 Division Completion Status")
-st.metric("Division Completion %", f"{division_completion_pct}%")
+st.metric("Division Completion %", f"{division_pct}%")
 
 st.divider()
 
 # --------------------------------------------------
 # OFFICE-WISE COMPLETION %
-
 # --------------------------------------------------
 office_summary = (
-    pivot_df.groupby("Office Group")
+    df.groupby("Office Group")
     .apply(lambda x: round((x["Completed Courses"].sum() / (len(x) * total_courses)) * 100, 2))
     .reset_index(name="Completion %")
 )
@@ -157,26 +114,26 @@ st.divider()
 # --------------------------------------------------
 # SEARCH EMPLOYEE
 # --------------------------------------------------
-st.subheader("🔍 Search Employee")
+st.subheader("🔍 Search Employee (min 4 characters)")
 
-names = sorted(pivot_df["Employee Name"].dropna().unique())
-search_text = st.text_input("Type at least 4 characters of your name")
+names = sorted(df["Employee Name"].dropna().unique())
+query = st.text_input("Type your name")
 
 selected_name = None
-if len(search_text) >= 4:
-    matches = [n for n in names if search_text.lower() in n.lower()]
+if len(query) >= 4:
+    matches = [n for n in names if query.lower() in n.lower()]
     if matches:
         selected_name = st.selectbox("Select your name", matches)
     else:
-        st.info("No matching name found")
+        st.info("No match found")
 
 if not selected_name:
     st.stop()
 
 # --------------------------------------------------
-# DISPLAY USER REPORT
+# DISPLAY USER REPORT (COLORED NAME)
 # --------------------------------------------------
-user_row = pivot_df[pivot_df["Employee Name"] == selected_name]
+user_row = df[df["Employee Name"] == selected_name]
 pct = float(user_row["Completion %"].iloc[0])
 color = completion_color(pct)
 
@@ -192,7 +149,7 @@ st.dataframe(user_row)
 # --------------------------------------------------
 st.download_button(
     "📥 Download My Course Report (Excel)",
-    data=df_to_excel_bytes(user_row, "My Report"),
+    data=df_to_excel_bytes(user_row),
     file_name=f"{selected_name}_course_report.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
