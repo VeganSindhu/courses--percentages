@@ -61,7 +61,7 @@ def office_group(office):
     return "Office Group 1" if office in group1 else "Office Group 2"
 
 # --------------------------------------------------
-# READ & CONSOLIDATE EXCEL
+# READ & CONSOLIDATE EXCEL (NO RMS TP FILTER)
 # --------------------------------------------------
 xls = pd.ExcelFile(uploaded_file)
 combined_df = pd.DataFrame()
@@ -69,6 +69,7 @@ combined_df = pd.DataFrame()
 for sheet in xls.sheet_names:
     df_sheet = pd.read_excel(uploaded_file, sheet_name=sheet)
 
+    # Header handling
     df_sheet.columns = df_sheet.iloc[0]
     df_sheet = df_sheet[1:]
     df_sheet = df_sheet.dropna(axis=1, how="all")
@@ -78,32 +79,23 @@ for sheet in xls.sheet_names:
     office_col = df_sheet.columns[4]
     df_sheet = df_sheet.rename(columns={office_col: "Office of Working"})
 
-    division_col = next(
-        (c for c in df_sheet.columns if "division" in c.lower() or "unit" in c.lower()),
-        None
-    )
-    if not division_col:
-        continue
+    df_sheet["Course Name"] = sheet
 
-    df_tp = df_sheet[df_sheet[division_col].astype(str).str.contains("RMS TP", case=False, na=False)]
-    if df_tp.empty:
-        continue
-
-    df_tp = normalize_columns(df_tp)
-    df_tp["Course Name"] = sheet
-
-    name_col = next((c for c in df_tp.columns if "name" in c.lower()), None)
+    # Normalize employee name column
+    name_col = next((c for c in df_sheet.columns if "name" in c.lower()), None)
     if name_col:
-        df_tp = df_tp.rename(columns={name_col: "Employee Name"})
+        df_sheet = df_sheet.rename(columns={name_col: "Employee Name"})
+    else:
+        continue
 
-    combined_df = pd.concat([combined_df, df_tp], ignore_index=True)
+    combined_df = pd.concat([combined_df, df_sheet], ignore_index=True)
 
 if combined_df.empty:
-    st.error("No RMS TP data found in Excel.")
+    st.error("No data found in Excel.")
     st.stop()
 
 # --------------------------------------------------
-# PIVOT + CALCULATIONS
+# CREATE PIVOT
 # --------------------------------------------------
 pivot_df = combined_df.pivot_table(
     index=["Employee Name", "Office of Working"],
@@ -129,7 +121,7 @@ division_completion_pct = round(
     (pivot_df["Completed Courses"].sum() / (len(pivot_df) * total_courses)) * 100, 2
 )
 
-st.subheader("📊 RMS TP Division Completion Status")
+st.subheader("📊 Division Completion Status")
 st.metric("Division Completion %", f"{division_completion_pct}%")
 
 st.divider()
