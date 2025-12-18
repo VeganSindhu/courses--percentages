@@ -94,12 +94,31 @@ st.dataframe(pd.DataFrame(unit_rows), use_container_width=True)
 st.divider()
 
 # --------------------------------------------------
-# LIVE SEARCH
+# LIVE SEARCH WITH CLEAR BUTTON
 # --------------------------------------------------
 st.subheader("🔍 Check Your Completion Status")
-query = st.text_input("Start typing your name")
 
-if not query.strip():
+# Initialize session state
+if "name_query" not in st.session_state:
+    st.session_state.name_query = ""
+
+col1, col2 = st.columns([5, 1])
+
+with col1:
+    st.text_input(
+        "Start typing your name",
+        key="name_query"
+    )
+
+with col2:
+    st.write("")  # spacing
+    if st.button("❌ Clear"):
+        st.session_state.name_query = ""
+        st.stop()
+
+query = st.session_state.name_query.strip()
+
+if not query:
     st.stop()
 
 matches = df[df["Employee Name"].str.contains(query, case=False, na=False)]
@@ -115,7 +134,7 @@ display_df = matches[
 st.caption("Matching employees")
 st.dataframe(display_df, use_container_width=True)
 
-# ✅ ALLOW TOGGLE WHEN MULTIPLE MATCHES
+# Allow toggle if multiple matches
 if len(display_df) == 1:
     selected_name = display_df.loc[0, "Employee Name"]
 else:
