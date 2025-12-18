@@ -37,11 +37,9 @@ def process_excel(file):
     df = pd.read_excel(file)
     df.columns = df.columns.astype(str).str.strip()
 
-    # Required columns
     if "Employee Name" not in df.columns or "Office of Working" not in df.columns:
         raise ValueError("Required columns missing")
 
-    # Course columns = numeric, excluding known columns
     ignore = {"Employee Name", "Office of Working", "Total Courses"}
     course_cols = [
         c for c in df.columns
@@ -53,20 +51,26 @@ def process_excel(file):
 
     total_courses = len(course_cols)
 
-    # 🔥 LOGIC: 1 = pending, 0 / blank = completed
+    # Normalize values: blanks → 0
     df[course_cols] = df[course_cols].fillna(0)
-    df["Pending Courses"] = df[course_cols].sum(axis=1)
+
+    # 🔥 1 = pending
+    df["Pending Courses"] = df[course_cols].eq(1).sum(axis=1)
     df["Completed Courses"] = total_courses - df["Pending Courses"]
 
+    # Employee-level completion %
     df["Completion %"] = round(
         (df["Completed Courses"] / total_courses) * 100, 2
     )
 
     df["Unit"] = df["Office of Working"].apply(unit_name)
 
-    division_pct = round(
-        (df["Completed Courses"].sum() / (len(df) * total_courses)) * 100, 2
-    )
+    # 🔥 Division-level calculation (YOUR FORMULA)
+    total_slots = len(df) * total_courses
+    pending_slots = df[course_cols].eq(1).sum().sum()
+    completed_slots = total_slots - pending_slots
+
+    division_pct = round((completed_slots / total_slots) * 100, 2)
 
     return df, course_cols, total_courses, division_pct
 
@@ -118,15 +122,17 @@ st.subheader("📊 Division Completion Status")
 st.metric("Division Completion %", f"{division_pct}%")
 
 # --------------------------------------------------
-# UNIT SUMMARY
+# UNIT SUMMARY (USING SAME FORMULA)
 # --------------------------------------------------
-unit_summary = (
-    df.groupby("Unit")
-    .apply(lambda x: round(
-        (x["Completed Courses"].sum() / (len(x) * total_courses)) * 100, 2
-    ))
-    .reset_index(name="Completion %")
-)
+unit_rows = []
+for unit, g in df.groupby("Unit"):
+    total_slots = len(g) * total_courses
+    pending_slots = g[course_cols].eq(1).sum().sum()
+    completed_slots = total_slots - pending_slots
+    pct = round((completed_slots / total_slots) * 100, 2)
+    unit_rows.append({"Unit": unit, "Completion %": pct})
+
+unit_summary = pd.DataFrame(unit_rows)
 
 st.subheader("🏢 Unit-wise Completion %")
 st.dataframe(unit_summary)
@@ -134,22 +140,22 @@ st.dataframe(unit_summary)
 st.divider()
 
 # --------------------------------------------------
-# LIVE SEARCH (NO ENTER)
+# TRUE LIVE SEARCH (NO ENTER)
 # --------------------------------------------------
 st.subheader("🔍 Check Your Completion Status")
 
 query = st.text_input("Start typing your name")
 
-matches = []
-if query:
-    matches = [
-        n for n in df["Employee Name"].unique()
-        if query.lower() in n.lower()
-    ]
-
 selected_name = None
-if matches:
-    selected_name = st.selectbox("Matching names", matches)
+if query.strip():
+    matches = df["Employee Name"][
+        df["Employee Name"].str.contains(query, case=False, na=False)
+    ].unique()
+
+    if len(matches) > 0:
+        selected_name = st.selectbox("Matching names", matches)
+    else:
+        st.info("No matching names found")
 
 if not selected_name:
     st.stop()
@@ -166,7 +172,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Show course-wise status
+# Course-wise view
 course_view = user_row[course_cols].T.reset_index()
 course_view.columns = ["Course Name", "Pending (1 = Pending)"]
 
