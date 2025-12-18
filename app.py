@@ -132,13 +132,38 @@ display_df = filtered_df[[
 
 st.caption("Matching employees (live filtered)")
 
-selected_index = st.radio(
-    "Select your name",
-    display_df.index,
-    format_func=lambda i: display_df.loc[i, "Employee Name"]
-)
+# --------------------------------------------------
+# LIVE FILTERING (NO RADIO, NO DROPDOWN)
+# --------------------------------------------------
+st.subheader("🔍 Check Your Completion Status")
 
-selected_name = display_df.loc[selected_index, "Employee Name"]
+query = st.text_input("Start typing your name")
+
+if not query.strip():
+    st.stop()
+
+filtered_df = df[
+    df["Employee Name"].str.contains(query, case=False, na=False)
+]
+
+if filtered_df.empty:
+    st.info("No matching names found")
+    st.stop()
+
+# Show matching names as a simple list
+display_df = filtered_df[[
+    "Employee Name",
+    "Office of Working",
+    "Unit",
+    "Completion %"
+]].reset_index(drop=True)
+
+st.caption("Matching employees (live filtered)")
+st.dataframe(display_df, use_container_width=True)
+
+# 🔥 AUTO-SELECT FIRST MATCH
+selected_name = display_df.loc[0, "Employee Name"]
+
 
 # --------------------------------------------------
 # USER REPORT
@@ -175,3 +200,4 @@ st.dataframe(user_row[[
     "Pending Courses",
     "Completion %"
 ]])
+
