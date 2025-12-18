@@ -96,27 +96,30 @@ st.divider()
 # --------------------------------------------------
 # LIVE SEARCH WITH CLEAR BUTTON (FIXED)
 # --------------------------------------------------
+# --------------------------------------------------
+# LIVE SEARCH WITH CLEAR BUTTON (STREAMLIT-SAFE)
+# --------------------------------------------------
 st.subheader("🔍 Check Your Completion Status")
 
-# Initialize state safely
-if "name_query" not in st.session_state:
-    st.session_state["name_query"] = ""
+# Initialize keys safely
+if "search_key" not in st.session_state:
+    st.session_state["search_key"] = 0
 
 col1, col2 = st.columns([5, 1])
 
 with col1:
-    st.text_input(
+    query = st.text_input(
         "Start typing your name",
-        key="name_query"
+        key=f"name_query_{st.session_state['search_key']}"
     )
 
 with col2:
     st.write("")
     if st.button("❌ Clear"):
-        st.session_state["name_query"] = ""
-        st.experimental_rerun()
+        st.session_state["search_key"] += 1
+        st.stop()   # stop current run cleanly
 
-query = st.session_state["name_query"].strip()
+query = query.strip()
 
 if not query:
     st.stop()
@@ -167,3 +170,4 @@ if pending.empty:
     st.success("🎉 No pending courses")
 else:
     st.dataframe(pending, use_container_width=True)
+
