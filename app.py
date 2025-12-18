@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
-from io import BytesIO
 
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
 st.set_page_config(page_title="Course Completion Status", layout="wide")
 st.title("📘 Course Completion Status")
+
+DATA_FILE = "data.xlsx"   # Admin updates this in GitHub
 
 # --------------------------------------------------
 # HELPERS
@@ -32,14 +33,16 @@ def unit_name(office):
     return "Nellore Unit" if office in nellore else "Tirupati Unit"
 
 
-@st.cache_data(show_spinner=False)
-def process_excel(file):
-    df = pd.read_excel(file)
+@st.cache_data
+def load_data():
+    df = pd.read_excel(DATA_FILE)
     df.columns = df.columns.astype(str).str.strip()
 
+    # Required columns
     if "Employee Name" not in df.columns or "Office of Working" not in df.columns:
-        raise ValueError("Required columns missing")
+        raise ValueError("Required columns missing in Excel")
 
+    # Course columns = numeric except known fields
     ignore = {"Employee Name", "Office of Working", "Total Courses"}
     course_cols = [
         c for c in df.columns
@@ -51,21 +54,19 @@ def process_excel(file):
 
     total_courses = len(course_cols)
 
-    # Normalize values: blanks → 0
+    # 1 = Pending, 0 / blank = Completed
     df[course_cols] = df[course_cols].fillna(0)
 
-    # 🔥 1 = pending
     df["Pending Courses"] = df[course_cols].eq(1).sum(axis=1)
     df["Completed Courses"] = total_courses - df["Pending Courses"]
 
-    # Employee-level completion %
     df["Completion %"] = round(
         (df["Completed Courses"] / total_courses) * 100, 2
     )
 
     df["Unit"] = df["Office of Working"].apply(unit_name)
 
-    # 🔥 Division-level calculation (YOUR FORMULA)
+    # Division-level calculation
     total_slots = len(df) * total_courses
     pending_slots = df[course_cols].eq(1).sum().sum()
     completed_slots = total_slots - pending_slots
@@ -75,45 +76,14 @@ def process_excel(file):
     return df, course_cols, total_courses, division_pct
 
 
-def df_to_excel_bytes(df):
-    out = BytesIO()
-    with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False)
-    out.seek(0)
-    return out.getvalue()
-
 # --------------------------------------------------
-# ADMIN PANEL
+# LOAD DATA (SHARED FOR ALL USERS)
 # --------------------------------------------------
-st.sidebar.header("🔐 Admin Panel")
-
-admin_file = st.sidebar.file_uploader(
-    "Upload / Update Excel (Admin only)",
-    type=["xlsx"]
-)
-
-if admin_file:
-    try:
-        df_data, course_cols, total_courses, division_pct = process_excel(admin_file)
-        st.session_state["df"] = df_data
-        st.session_state["courses"] = course_cols
-        st.session_state["total_courses"] = total_courses
-        st.session_state["division_pct"] = division_pct
-        st.sidebar.success("✅ Data updated successfully")
-    except Exception as e:
-        st.sidebar.error(str(e))
-
-# --------------------------------------------------
-# CHECK DATA AVAILABILITY
-# --------------------------------------------------
-if "df" not in st.session_state:
-    st.info("⏳ Data not yet uploaded by Admin.")
+try:
+    df, course_cols, total_courses, division_pct = load_data()
+except Exception as e:
+    st.error(str(e))
     st.stop()
-
-df = st.session_state["df"]
-course_cols = st.session_state["courses"]
-total_courses = st.session_state["total_courses"]
-division_pct = st.session_state["division_pct"]
 
 # --------------------------------------------------
 # DIVISION SUMMARY
@@ -122,7 +92,7 @@ st.subheader("📊 Division Completion Status")
 st.metric("Division Completion %", f"{division_pct}%")
 
 # --------------------------------------------------
-# UNIT SUMMARY (USING SAME FORMULA)
+# UNIT SUMMARY
 # --------------------------------------------------
 unit_rows = []
 for unit, g in df.groupby("Unit"):
@@ -132,38 +102,48 @@ for unit, g in df.groupby("Unit"):
     pct = round((completed_slots / total_slots) * 100, 2)
     unit_rows.append({"Unit": unit, "Completion %": pct})
 
-unit_summary = pd.DataFrame(unit_rows)
-
 st.subheader("🏢 Unit-wise Completion %")
-st.dataframe(unit_summary)
+st.dataframe(pd.DataFrame(unit_rows))
 
 st.divider()
 
 # --------------------------------------------------
-# TRUE LIVE SEARCH (NO ENTER)
+# LIVE FILTERING (NO ENTER, NO DROPDOWN)
 # --------------------------------------------------
 st.subheader("🔍 Check Your Completion Status")
 
 query = st.text_input("Start typing your name")
 
-selected_name = None
+filtered_df = df
 if query.strip():
-    matches = df["Employee Name"][
-        df["Employee Name"].str.contains(query, case=False, na=False)
-    ].unique()
+    filtered_df = df[df["Employee Name"].str.contains(query, case=False, na=False)]
 
-    if len(matches) > 0:
-        selected_name = st.selectbox("Matching names", matches)
-    else:
-        st.info("No matching names found")
-
-if not selected_name:
+if filtered_df.empty:
+    st.info("No matching names found")
     st.stop()
+
+# Show filtered list
+display_df = filtered_df[[
+    "Employee Name",
+    "Office of Working",
+    "Unit",
+    "Completion %"
+]].reset_index(drop=True)
+
+st.caption("Matching employees (live filtered)")
+
+selected_index = st.radio(
+    "Select your name",
+    display_df.index,
+    format_func=lambda i: display_df.loc[i, "Employee Name"]
+)
+
+selected_name = display_df.loc[selected_index, "Employee Name"]
 
 # --------------------------------------------------
 # USER REPORT
 # --------------------------------------------------
-user_row = df[df["Employee Name"] == selected_name].copy()
+user_row = df[df["Employee Name"] == selected_name]
 pct = float(user_row["Completion %"].iloc[0])
 color = completion_color(pct)
 
@@ -172,12 +152,19 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Course-wise view
-course_view = user_row[course_cols].T.reset_index()
-course_view.columns = ["Course Name", "Pending (1 = Pending)"]
+# Pending courses
+pending_courses = (
+    user_row[course_cols]
+    .T.reset_index()
+)
+pending_courses.columns = ["Course Name", "Pending (1 = Pending)"]
+pending_courses = pending_courses[pending_courses["Pending (1 = Pending)"] == 1]
 
-st.subheader("📘 Course-wise Status")
-st.dataframe(course_view)
+st.subheader("📘 Pending Courses")
+if pending_courses.empty:
+    st.success("🎉 No pending courses")
+else:
+    st.dataframe(pending_courses)
 
 st.subheader("📄 Summary")
 st.dataframe(user_row[[
@@ -188,13 +175,3 @@ st.dataframe(user_row[[
     "Pending Courses",
     "Completion %"
 ]])
-
-# --------------------------------------------------
-# DOWNLOAD
-# --------------------------------------------------
-st.download_button(
-    "📥 Download My Report",
-    data=df_to_excel_bytes(user_row),
-    file_name=f"{selected_name}_course_report.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
