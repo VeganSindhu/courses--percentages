@@ -1,13 +1,48 @@
 import streamlit as st
 import pandas as pd
+import re
+from datetime import datetime
+
+# --------------------------------------------------
+# CONFIG
+# --------------------------------------------------
+DATA_FILE = "data 16.12.25.xlsx"   # <-- update only file name when uploading new data
+
+# --------------------------------------------------
+# EXTRACT DATE FROM FILE NAME
+# --------------------------------------------------
+def extract_date_from_filename(filename):
+    """
+    Supports:
+    data 16.12.25.xlsx
+    data 16.12.2025.xlsx
+    """
+    match = re.search(r"(\d{1,2}\.\d{1,2}\.\d{2,4})", filename)
+    if not match:
+        return None
+
+    date_str = match.group(1)
+
+    try:
+        if len(date_str.split(".")[-1]) == 2:
+            return datetime.strptime(date_str, "%d.%m.%y").strftime("%d.%m.%Y")
+        else:
+            return datetime.strptime(date_str, "%d.%m.%Y").strftime("%d.%m.%Y")
+    except Exception:
+        return date_str
+
+
+as_on_date = extract_date_from_filename(DATA_FILE)
 
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
 st.set_page_config(page_title="Course Completion Status", layout="wide")
-st.title("📘 Course Completion Status")
 
-DATA_FILE = "data.xlsx"   # Admin updates this file in GitHub
+if as_on_date:
+    st.title(f"📘 Course Completion Status as on {as_on_date}")
+else:
+    st.title("📘 Course Completion Status")
 
 # --------------------------------------------------
 # HELPERS
@@ -38,25 +73,18 @@ def load_data():
     df = pd.read_excel(DATA_FILE)
     df.columns = df.columns.astype(str).str.strip()
 
-    # Mandatory columns
     if "Employee Name" not in df.columns or "Office of Working" not in df.columns:
-        raise ValueError("Excel must contain 'Employee Name' and 'Office of Working'")
+        raise ValueError("Required columns missing in Excel")
 
-    # Identify course columns (numeric only)
     ignore_cols = {"Employee Name", "Office of Working", "Total Courses"}
     course_cols = [
         c for c in df.columns
         if c not in ignore_cols and pd.api.types.is_numeric_dtype(df[c])
     ]
 
-    if not course_cols:
-        raise ValueError("No course columns detected")
-
     total_courses = len(course_cols)
 
-    # 1 = Pending, 0 / blank = Completed
     df[course_cols] = df[course_cols].fillna(0)
-
     df["Pending Courses"] = df[course_cols].eq(1).sum(axis=1)
     df["Completed Courses"] = total_courses - df["Pending Courses"]
 
@@ -64,14 +92,11 @@ def load_data():
         (df["Completed Courses"] / total_courses) * 100, 2
     )
 
-    # Unit mapping
     df["Unit"] = df["Office of Working"].apply(unit_name)
 
-    # Division-level calculation (official formula)
     total_slots = len(df) * total_courses
     pending_slots = df[course_cols].eq(1).sum().sum()
     completed_slots = total_slots - pending_slots
-
     division_pct = round((completed_slots / total_slots) * 100, 2)
 
     return df, course_cols, total_courses, division_pct
@@ -109,7 +134,7 @@ st.dataframe(pd.DataFrame(unit_rows), use_container_width=True)
 st.divider()
 
 # --------------------------------------------------
-# LIVE FILTERING (ONE TEXT BOX ONLY)
+# LIVE FILTERING
 # --------------------------------------------------
 st.subheader("🔍 Check Your Completion Status")
 
@@ -118,26 +143,19 @@ query = st.text_input("Start typing your name")
 if not query.strip():
     st.stop()
 
-filtered_df = df[
-    df["Employee Name"].str.contains(query, case=False, na=False)
-]
+filtered_df = df[df["Employee Name"].str.contains(query, case=False, na=False)]
 
 if filtered_df.empty:
     st.info("No matching names found")
     st.stop()
 
-# Show matching names live
-display_df = filtered_df[[
-    "Employee Name",
-    "Office of Working",
-    "Unit",
-    "Completion %"
-]].reset_index(drop=True)
+display_df = filtered_df[
+    ["Employee Name", "Office of Working", "Unit", "Completion %"]
+].reset_index(drop=True)
 
 st.caption("Matching employees (live filtered)")
 st.dataframe(display_df, use_container_width=True)
 
-# 🔥 Auto-pick first matching name
 selected_name = display_df.loc[0, "Employee Name"]
 
 # --------------------------------------------------
@@ -152,7 +170,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Pending courses
 pending_courses = (
     user_row[course_cols]
     .T.reset_index()
@@ -165,18 +182,3 @@ if pending_courses.empty:
     st.success("🎉 No pending courses")
 else:
     st.dataframe(pending_courses, use_container_width=True)
-
-st.subheader("📄 Summary")
-st.dataframe(
-    user_row[
-        [
-            "Employee Name",
-            "Office of Working",
-            "Unit",
-            "Completed Courses",
-            "Pending Courses",
-            "Completion %"
-        ]
-    ],
-    use_container_width=True
-)
