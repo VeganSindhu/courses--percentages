@@ -40,6 +40,15 @@ def normalize_columns(df):
     return df
 
 
+def find_header_row(df):
+    """Find row containing employee name header"""
+    for i in range(min(10, len(df))):
+        row = df.iloc[i].astype(str).str.lower()
+        if row.str.contains("name").any():
+            return i
+    return None
+
+
 def completion_color(pct):
     if pct < 10:
         return "red"
@@ -61,37 +70,41 @@ def office_group(office):
     return "Office Group 1" if office in group1 else "Office Group 2"
 
 # --------------------------------------------------
-# READ & CONSOLIDATE EXCEL (NO RMS TP FILTER)
+# READ & CONSOLIDATE EXCEL (AUTO HEADER DETECTION)
 # --------------------------------------------------
 xls = pd.ExcelFile(uploaded_file)
 combined_df = pd.DataFrame()
 
 for sheet in xls.sheet_names:
-    df_sheet = pd.read_excel(uploaded_file, sheet_name=sheet)
+    raw = pd.read_excel(uploaded_file, sheet_name=sheet, header=None)
 
-    # Header handling
-    df_sheet.columns = df_sheet.iloc[0]
-    df_sheet = df_sheet[1:]
+    header_row = find_header_row(raw)
+    if header_row is None:
+        continue
+
+    df_sheet = raw.iloc[header_row + 1:].copy()
+    df_sheet.columns = raw.iloc[header_row]
     df_sheet = df_sheet.dropna(axis=1, how="all")
     df_sheet = normalize_columns(df_sheet)
 
-    # Column E = Office of Working
-    office_col = df_sheet.columns[4]
-    df_sheet = df_sheet.rename(columns={office_col: "Office of Working"})
-
-    df_sheet["Course Name"] = sheet
-
     # Normalize employee name column
     name_col = next((c for c in df_sheet.columns if "name" in c.lower()), None)
-    if name_col:
-        df_sheet = df_sheet.rename(columns={name_col: "Employee Name"})
-    else:
+    if not name_col:
         continue
+    df_sheet = df_sheet.rename(columns={name_col: "Employee Name"})
+
+    # Column E → Office of Working (safe)
+    if len(df_sheet.columns) >= 5:
+        df_sheet = df_sheet.rename(columns={df_sheet.columns[4]: "Office of Working"})
+    else:
+        df_sheet["Office of Working"] = "Unknown"
+
+    df_sheet["Course Name"] = sheet
 
     combined_df = pd.concat([combined_df, df_sheet], ignore_index=True)
 
 if combined_df.empty:
-    st.error("No data found in Excel.")
+    st.error("No usable employee data found in Excel sheets.")
     st.stop()
 
 # --------------------------------------------------
@@ -128,15 +141,15 @@ st.divider()
 
 # --------------------------------------------------
 # OFFICE-WISE COMPLETION %
-# --------------------------------------------------
-st.subheader("🏢 Office-wise Completion %")
 
+# --------------------------------------------------
 office_summary = (
     pivot_df.groupby("Office Group")
     .apply(lambda x: round((x["Completed Courses"].sum() / (len(x) * total_courses)) * 100, 2))
     .reset_index(name="Completion %")
 )
 
+st.subheader("🏢 Office-wise Completion %")
 st.dataframe(office_summary)
 
 st.divider()
@@ -161,7 +174,7 @@ if not selected_name:
     st.stop()
 
 # --------------------------------------------------
-# DISPLAY USER REPORT WITH COLORED NAME
+# DISPLAY USER REPORT
 # --------------------------------------------------
 user_row = pivot_df[pivot_df["Employee Name"] == selected_name]
 pct = float(user_row["Completion %"].iloc[0])
