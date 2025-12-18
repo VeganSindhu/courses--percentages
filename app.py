@@ -94,13 +94,13 @@ st.dataframe(pd.DataFrame(unit_rows), use_container_width=True)
 st.divider()
 
 # --------------------------------------------------
-# LIVE SEARCH WITH CLEAR BUTTON
+# LIVE SEARCH WITH CLEAR BUTTON (FIXED)
 # --------------------------------------------------
 st.subheader("🔍 Check Your Completion Status")
 
-# Initialize session state
+# Initialize state safely
 if "name_query" not in st.session_state:
-    st.session_state.name_query = ""
+    st.session_state["name_query"] = ""
 
 col1, col2 = st.columns([5, 1])
 
@@ -111,12 +111,12 @@ with col1:
     )
 
 with col2:
-    st.write("")  # spacing
+    st.write("")
     if st.button("❌ Clear"):
-        st.session_state.name_query = ""
-        st.stop()
+        st.session_state["name_query"] = ""
+        st.experimental_rerun()
 
-query = st.session_state.name_query.strip()
+query = st.session_state["name_query"].strip()
 
 if not query:
     st.stop()
