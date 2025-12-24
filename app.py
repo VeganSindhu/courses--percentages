@@ -69,8 +69,8 @@ def unit_name(office):
 # LOAD DATA
 # --------------------------------------------------
 @st.cache_data
-def load_data():
-    df = pd.read_excel(DATA_FILE)
+def load_data(data_file):
+    df = pd.read_excel(data_file)
     df.columns = df.columns.astype(str).str.strip()
 
     ignore = {"Employee Name", "Office of Working", "Total Courses"}
@@ -99,7 +99,7 @@ def load_data():
     return df, course_cols, total_courses, division_pct
 
 
-df, course_cols, total_courses, division_pct = load_data()
+df, course_cols, total_courses, division_pct = load_data(DATA_FILE)
 
 # --------------------------------------------------
 # DIVISION & UNIT SUMMARY
@@ -187,3 +187,4 @@ if pending.empty:
     st.success("🎉 No pending courses")
 else:
     st.dataframe(pending, use_container_width=True)
+
