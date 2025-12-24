@@ -36,7 +36,9 @@ def get_data_file_and_date():
     return file_name, as_on
 
 
-# ✅ REQUIRED INITIALIZATION (CRITICAL)
+# --------------------------------------------------
+# INITIALIZE FILE & DATE
+# --------------------------------------------------
 DATA_FILE, AS_ON_DATE = get_data_file_and_date()
 
 # --------------------------------------------------
@@ -66,37 +68,46 @@ def unit_name(office):
 
 
 # --------------------------------------------------
-# LOAD DATA
+# LOAD DATA (CACHE-SAFE)
 # --------------------------------------------------
 @st.cache_data
 def load_data(data_file):
     df = pd.read_excel(data_file)
     df.columns = df.columns.astype(str).str.strip()
 
+    # Identify course columns safely
     ignore = {"Employee Name", "Office of Working", "Total Courses"}
     course_cols = [
         c for c in df.columns
         if c not in ignore and pd.api.types.is_numeric_dtype(df[c])
     ]
 
-    total_courses = len(course_cols)
-    df[course_cols] = df[course_cols].fillna(0)
+    # Force strict 0 / 1 integers
+    df[course_cols] = df[course_cols].fillna(0).astype(int)
 
-    df["Pending Courses"] = df[course_cols].eq(1).sum(axis=1)
-    df["Completed Courses"] = total_courses - df["Pending Courses"]
+    num_employees = df.shape[0]
+    num_courses = len(course_cols)
+
+    # Employee-level calculations
+    df["Pending Courses"] = df[course_cols].sum(axis=1)
+    df["Completed Courses"] = num_courses - df["Pending Courses"]
     df["Completion %"] = round(
-        (df["Completed Courses"] / total_courses) * 100, 2
+        (df["Completed Courses"] / num_courses) * 100, 2
     )
 
+    # Unit mapping
     df["Unit"] = df["Office of Working"].apply(unit_name)
 
-    total_slots = len(df) * total_courses
-    pending_slots = df[course_cols].eq(1).sum().sum()
+    # Division-level calculation (CORRECT BASE)
+    total_slots = num_employees * num_courses
+    pending_slots = df[course_cols].sum().sum()
+    completed_slots = total_slots - pending_slots
+
     division_pct = round(
-        ((total_slots - pending_slots) / total_slots) * 100, 2
+        (completed_slots / total_slots) * 100, 2
     )
 
-    return df, course_cols, total_courses, division_pct
+    return df, course_cols, num_courses, division_pct
 
 
 df, course_cols, total_courses, division_pct = load_data(DATA_FILE)
@@ -108,11 +119,22 @@ st.subheader("📊 Division Completion Status")
 st.metric("Division Completion %", f"{division_pct}%")
 
 unit_rows = []
+
 for unit, g in df.groupby("Unit"):
-    total_slots = len(g) * total_courses
-    pending = g[course_cols].eq(1).sum().sum()
-    pct = round(((total_slots - pending) / total_slots) * 100, 2)
-    unit_rows.append({"Unit": unit, "Completion %": pct})
+    n_emp = g.shape[0]
+    total_slots = n_emp * total_courses
+
+    pending_slots = g[course_cols].sum().sum()
+    completed_slots = total_slots - pending_slots
+
+    pct = round(
+        (completed_slots / total_slots) * 100, 2
+    )
+
+    unit_rows.append({
+        "Unit": unit,
+        "Completion %": pct
+    })
 
 st.subheader("🏢 Unit-wise Completion %")
 st.dataframe(pd.DataFrame(unit_rows), use_container_width=True)
@@ -187,4 +209,3 @@ if pending.empty:
     st.success("🎉 No pending courses")
 else:
     st.dataframe(pending, use_container_width=True)
-
