@@ -54,7 +54,7 @@ def unit_name(office):
 
 
 # --------------------------------------------------
-# LOAD DATA (CACHE SAFE)
+# LOAD DATA
 # --------------------------------------------------
 @st.cache_data
 def load_data(data_file):
@@ -67,7 +67,7 @@ def load_data(data_file):
         if c not in ignore and pd.api.types.is_numeric_dtype(df[c])
     ]
 
-    # Force strict 0/1
+    # Force strict 0 / 1
     df[course_cols] = df[course_cols].fillna(0).astype(int)
 
     df["Unit"] = df["Office of Working"].apply(unit_name)
@@ -85,45 +85,48 @@ def load_data(data_file):
 df, course_cols, num_employees, num_courses = load_data(DATA_FILE)
 
 # --------------------------------------------------
-# 🔷 DIVISION SUMMARY (WITH RAW NUMBERS)
+# 📊 DIVISION SUMMARY (COURSES-BASED)
 # --------------------------------------------------
 st.subheader("📊 Division-level Course Status")
 
-total_slots = num_employees * num_courses
-pending_slots = df[course_cols].sum().sum()
-completed_slots = total_slots - pending_slots
-division_pct = round((completed_slots / total_slots) * 100, 2)
+total_courses_div = num_employees * num_courses
+pending_courses_div = df[course_cols].sum().sum()
+completed_courses_div = total_courses_div - pending_courses_div
+division_pct = round(
+    (completed_courses_div / total_courses_div) * 100, 2
+)
 
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 
 c1.metric("Employees", num_employees)
-c2.metric("Courses", num_courses)
-c3.metric("Total Slots", total_slots)
-c4.metric("Pending Slots", pending_slots)
-c5.metric("Completion %", f"{division_pct}%")
+c2.metric("Courses / Employee", num_courses)
+c3.metric("Total Courses", total_courses_div)
+c4.metric("Pending Courses", pending_courses_div)
+c5.metric("Completed Courses", completed_courses_div)
+c6.metric("Completion %", f"{division_pct}%")
 
 st.divider()
 
 # --------------------------------------------------
-# 🏢 UNIT-WISE SUMMARY (FULL CLARITY)
+# 🏢 UNIT-WISE SUMMARY (COURSES-BASED)
 # --------------------------------------------------
 st.subheader("🏢 Unit-wise Course Status")
 
 unit_rows = []
 
 for unit, g in df.groupby("Unit"):
-    n_emp = g.shape[0]
-    total = n_emp * num_courses
+    emp = g.shape[0]
+    total = emp * num_courses
     pending = g[course_cols].sum().sum()
     completed = total - pending
     pct = round((completed / total) * 100, 2)
 
     unit_rows.append({
         "Unit": unit,
-        "Employees": n_emp,
-        "Total Slots": total,
-        "Pending Slots": pending,
-        "Completed Slots": completed,
+        "Employees": emp,
+        "Total Courses": total,
+        "Pending Courses": pending,
+        "Completed Courses": completed,
         "Completion %": pct
     })
 
@@ -133,7 +136,7 @@ st.dataframe(unit_df, use_container_width=True)
 st.divider()
 
 # --------------------------------------------------
-# 🔍 SEARCH (UNCHANGED)
+# 🔍 SEARCH EMPLOYEE
 # --------------------------------------------------
 st.subheader("🔍 Check Your Completion Status")
 
@@ -165,26 +168,32 @@ if matches.empty:
     st.stop()
 
 st.dataframe(
-    matches[["Employee Name", "Office of Working", "Unit", "Pending Courses"]],
+    matches[
+        ["Employee Name", "Office of Working", "Unit",
+         "Pending Courses", "Completed Courses"]
+    ],
     use_container_width=True
 )
 
 st.divider()
 
 # --------------------------------------------------
-# 🚨 EMPLOYEES WITH ZERO COURSES COMPLETED
+# 🚨 ZERO COMPLETION EMPLOYEES
 # --------------------------------------------------
 st.subheader("🚨 Employees who have NOT completed even ONE course")
 
-zero_completed = df[df["Pending Courses"] == num_courses]
+zero_completed = df[df["Completed Courses"] == 0]
 
 if zero_completed.empty:
     st.success("🎉 All employees have completed at least one course")
 else:
-    st.error(f"⚠️ {len(zero_completed)} employees have completed ZERO courses")
+    st.error(
+        f"⚠️ {len(zero_completed)} employees have completed ZERO courses"
+    )
     st.dataframe(
         zero_completed[
-            ["Employee Name", "Office of Working", "Unit", "Pending Courses"]
+            ["Employee Name", "Office of Working", "Unit",
+             "Pending Courses"]
         ],
         use_container_width=True
     )
