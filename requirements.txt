@@ -1,5 +1,5 @@
-streamlit
-pandas
-openpyxl
-chardet
-pyarrow
+streamlit==1.45.1
+pandas==2.2.3
+openpyxl==3.1.5
+chardet==5.2.0
+pyarrow==18.1.0
